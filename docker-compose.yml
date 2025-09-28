@@ -1,0 +1,36 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      DEBUG: "true"
+    depends_on:
+      - db
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=restaurant_user
+      - POSTGRES_PASSWORD=restaurant_password
+      - POSTGRES_DB=restaurant_db
+    ports: 
+      - 5432:5432
+    healthcheck:
+      test: ["CMD", 'pg_isready -U user -d restaurant-system']
+      interval: 1m30s
+      timeout: 30s
+      retries: 5
+      start_period: 30s
+    volumes:
+      - ./order-service/internal/adapters/repositories/postgres/migrations:/docker-entrypoint-initdb.d
+
+  rabbitmq:
+    image: rabbitmq:management
+    container_name: rabbitmq
+    environment:
+      - RABBITMQ_DEFAULT_USER=guest
+      - RABBITMQ_DEFAULT_PASSWORD=guest
+    ports:
+      - "5672:5672"
+      - "15672:15672"
