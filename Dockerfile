@@ -6,10 +6,4 @@ COPY . .
 
 RUN go build -o restaurant-system ./cmd
 
-FROM alpine
-
-COPY --from=builder /app/restaurant-system /restaurant-system
-
-COPY --from=builder /app/configs/config.yaml /config.yaml
-
 CMD ["./restaurant-system"]

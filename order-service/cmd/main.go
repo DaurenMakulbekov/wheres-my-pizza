@@ -2,57 +2,57 @@ package main
 
 import (
 	"context"
-	"fmt"
-	"os"
+	"errors"
+	"log"
+	"net/http"
+	"os/signal"
+	"syscall"
 	"time"
+	"wheres-my-pizza/order-service/internal/adapters/handlers"
+	"wheres-my-pizza/order-service/internal/adapters/repositories/postgres/repository"
+	"wheres-my-pizza/order-service/internal/core/services"
+	"wheres-my-pizza/order-service/internal/infrastructure/config"
 
-	amqp "github.com/rabbitmq/amqp091-go"
+	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
-func failOnError(err error, message string) {
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s: %v", message, err)
-		os.Exit(1)
-	}
-}
-
 func main() {
-	conn, err := amqp.Dial("amqp://guest:guest@localhost:5672/")
-	failOnError(err, "Failed to connect to RabbitMQ")
-	defer conn.Close()
+	config := config.NewAppConfig()
+	ctx := context.Background()
 
-	ch, err := conn.Channel()
-	failOnError(err, "Failed to open a channel")
-	defer ch.Close()
+	var orderRepository = postgres.NewPostgresRepository(config.DB)
+	var orderService = services.NewOrderService(orderRepository)
+	var handler = handlers.NewOrderHandler(orderRepository, orderService)
 
-	err = ch.ExchangeDeclare(
-		"task_exchange", // name
-		"fanout",        // type
-		true,            // durable
-		false,           // auto deleted
-		false,           // internal
-		false,           // no-wait
-		nil,             // arguments
-	)
-	failOnError(err, "Failed to declare an exchange")
+	mux := http.NewServeMux()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	mux.HandleFunc("POST /orders", handler.CreateOrderHandler)
+
+	server := &http.Server{
+		Addr:    ":8080",
+		Handler: mux,
+	}
+
+	signalCtx, signalCtxStop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGTSTP)
+	defer signalCtxStop()
+
+	go func() {
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("Listen and serve returned error: %v", err)
+		}
+	}()
+
+	<-signalCtx.Done()
+
+	log.Println("Shutting down server...")
+	time.Sleep(5 * time.Second)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	var buf = "Message " + os.Args[1]
+	if err := server.Shutdown(ctx); err != nil {
+		log.Printf("Error during shutdown: %v\n", err)
+	}
 
-	err = ch.PublishWithContext(ctx,
-		"task_exchange", // exchange
-		"",              // routing key
-		false,           // mandatory
-		false,           // immediate
-		amqp.Publishing{
-			//DeliveryMode: amqp.Persistent,
-			ContentType: "text/plain",
-			Body:        []byte(buf),
-		},
-	)
-	failOnError(err, "Failed to publish a message")
-
-	fmt.Println("Sent")
+	log.Println("Server shutdown complete")
 }

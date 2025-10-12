@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"errors"
 	"time"
 )
 
@@ -29,3 +30,14 @@ type OrderItem struct {
 	CreatedAt time.Time `json:"created_at"`
 	OrderID   int       `json:"order_id"`
 }
+
+type Result struct {
+	OrderNumber string  `json:"order_number"`
+	Status      string  `json:"status"`
+	TotalAmount float64 `json:"total_amount"`
+}
+
+var (
+	ErrorBadRequest     = errors.New("Incorrect input")
+	InternalServerError = errors.New("Internal Server Error")
+)
