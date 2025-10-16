@@ -35,8 +35,19 @@ func (hd *handler) CreateOrderHandler(w http.ResponseWriter, req *http.Request) 
 
 	var opts = &slog.HandlerOptions{
 		Level: slog.LevelDebug,
+		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+			if a.Key == slog.TimeKey {
+				a.Key = "timestamp"
+			}
+			if a.Key == slog.MessageKey {
+				a.Key = "message"
+			}
+
+			return a
+		},
 	}
 	var logger = slog.New(slog.NewJSONHandler(os.Stdout, opts))
+	slog.SetDefault(logger)
 
 	result, err := hd.orderService.CreateOrder(order)
 	if err != nil {
@@ -46,24 +57,24 @@ func (hd *handler) CreateOrderHandler(w http.ResponseWriter, req *http.Request) 
 			var m = map[string]string{"error": "Incorrect input"}
 			encoder := json.NewEncoder(w)
 			encoder.SetIndent("", " ")
-			var err = encoder.Encode(m)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			var err_ = encoder.Encode(m)
+			if err_ != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err_)
 			}
 
-			logger.Error("Incorrect input", "method", "POST", "status", 400)
+			slog.Error("Incorrect input", "service", "order-service", "hostname", "order-service", "request_id", "create_order", "action", "validation_failed", slog.Any("error", err))
 		} else if errors.Is(err, domain.InternalServerError) {
 			w.WriteHeader(http.StatusInternalServerError)
 			w.Header().Set("Content-Type", "application/json")
 			var m = map[string]string{"error": ""}
 			encoder := json.NewEncoder(w)
 			encoder.SetIndent("", " ")
-			var err = encoder.Encode(m)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			var err_ = encoder.Encode(m)
+			if err_ != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err_)
 			}
 
-			logger.Error("", "method", "POST", "status", 500)
+			slog.Error("Failed to create order", "service", "order-service", "hostname", "order-service", "request_id", "create_order", "action", "db_transaction_failed", slog.Any("error", err))
 		}
 
 		return
@@ -78,5 +89,5 @@ func (hd *handler) CreateOrderHandler(w http.ResponseWriter, req *http.Request) 
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 	}
 
-	logger.Debug("Order successfully created", "method", "POST", "status", 200)
+	slog.Debug("Order successfully created", "service", "order-service", "hostname", "order-service", "request_id", "create_order", "action", "order_received")
 }
