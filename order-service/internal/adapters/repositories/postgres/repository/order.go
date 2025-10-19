@@ -67,3 +67,17 @@ func (postgresRepo *postgres) CreateOrder(order domain.Order) error {
 
 	return nil
 }
+
+func (postgresRepo *postgres) GetOrderNumber() (string, error) {
+	var order domain.Order
+
+	row := postgresRepo.db.QueryRow("SELECT number FROM orders ORDER BY id DESC LIMIT 1")
+	if err := row.Scan(&order.Number); err != nil {
+		if err == sql.ErrNoRows {
+			return order.Number, fmt.Errorf("Error: %v", err)
+		}
+		return order.Number, fmt.Errorf("Error: %v", err)
+	}
+
+	return order.Number, nil
+}

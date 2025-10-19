@@ -49,12 +49,12 @@ func (hd *handler) CreateOrderHandler(w http.ResponseWriter, req *http.Request) 
 	var logger = slog.New(slog.NewJSONHandler(os.Stdout, opts))
 	slog.SetDefault(logger)
 
-	result, err := hd.orderService.CreateOrder(order)
+	result, err, message := hd.orderService.CreateOrder(order)
 	if err != nil {
 		if errors.Is(err, domain.ErrorBadRequest) {
 			w.WriteHeader(http.StatusBadRequest)
 			w.Header().Set("Content-Type", "application/json")
-			var m = map[string]string{"error": "Incorrect input"}
+			var m = map[string]string{"error": message.Error()}
 			encoder := json.NewEncoder(w)
 			encoder.SetIndent("", " ")
 			var err_ = encoder.Encode(m)
@@ -66,7 +66,7 @@ func (hd *handler) CreateOrderHandler(w http.ResponseWriter, req *http.Request) 
 		} else if errors.Is(err, domain.InternalServerError) {
 			w.WriteHeader(http.StatusInternalServerError)
 			w.Header().Set("Content-Type", "application/json")
-			var m = map[string]string{"error": ""}
+			var m = map[string]string{"error": message.Error()}
 			encoder := json.NewEncoder(w)
 			encoder.SetIndent("", " ")
 			var err_ = encoder.Encode(m)

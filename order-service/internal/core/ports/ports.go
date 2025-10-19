@@ -5,9 +5,10 @@ import (
 )
 
 type OrderService interface {
-	CreateOrder(order domain.Order) (domain.Result, error)
+	CreateOrder(order domain.Order) (domain.Result, error, error)
 }
 
 type OrderRepository interface {
 	CreateOrder(order domain.Order) error
+	GetOrderNumber() (string, error)
 }
