@@ -27,7 +27,7 @@ type AppConfig struct {
 }
 
 func GetEnv() map[string]map[string]string {
-	buf, err := os.ReadFile("./configs/config.yaml")
+	buf, err := os.ReadFile("./order-service/configs/config.yaml")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)

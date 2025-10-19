@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"wheres-my-pizza/order-service/cmd/app"
 )
 
 func main() {
@@ -11,6 +12,6 @@ func main() {
 	flag.Parse()
 
 	if *mode == "order-service" {
-
+		app.Run()
 	}
 }
