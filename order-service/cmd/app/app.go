@@ -9,7 +9,7 @@ import (
 	"syscall"
 	"time"
 	"wheres-my-pizza/order-service/internal/adapters/handlers"
-	"wheres-my-pizza/order-service/internal/adapters/repositories/postgres/repository"
+	"wheres-my-pizza/order-service/internal/adapters/repositories/postgres"
 	"wheres-my-pizza/order-service/internal/core/services"
 	"wheres-my-pizza/order-service/internal/infrastructure/config"
 
@@ -20,7 +20,12 @@ func Run() {
 	config := config.NewAppConfig()
 	ctx := context.Background()
 
-	var orderRepository = postgres.NewPostgresRepository(config.DB)
+	db, err := postgres.ConnectDB(config.DB)
+	if err != nil {
+		log.Fatal("Unable to connect to database")
+	}
+
+	var orderRepository = postgres.NewOrderRepository(db)
 	var orderService = services.NewOrderService(orderRepository)
 	var handler = handlers.NewOrderHandler(orderRepository, orderService)
 
