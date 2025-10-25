@@ -2,57 +2,85 @@ package rabbitmq
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"log"
 	"os"
+	"strconv"
 	"time"
+	"wheres-my-pizza/order-service/internal/core/domain"
+	"wheres-my-pizza/order-service/internal/infrastructure/config"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
-func failOnError(err error, message string) {
+type publisher struct {
+	Conn    *amqp.Connection
+	Channel *amqp.Channel
+}
+
+func NewRabbitMQRepository(config *config.RabbitMQ) *publisher {
+	var url = fmt.Sprintf("amqp://%s:%s@%s:%s/", config.User, config.Password, config.Host, config.Port)
+
+	conn, err := amqp.Dial(url)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s: %v", message, err)
-		os.Exit(1)
+		log.Fatalf("Failed to connect to RabbitMQ: %v", err)
+	}
+
+	ch, err := conn.Channel()
+	if err != nil {
+		log.Fatalf("Failed to open a channel: %v", err)
+	}
+
+	return &publisher{
+		Conn:    conn,
+		Channel: ch,
 	}
 }
 
-func Publish() {
-	conn, err := amqp.Dial("amqp://guest:guest@localhost:5672/")
-	failOnError(err, "Failed to connect to RabbitMQ")
-	defer conn.Close()
+func failOnError(err error, message string) {
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%s: %v", message, err)
+	}
+}
 
-	ch, err := conn.Channel()
-	failOnError(err, "Failed to open a channel")
-	defer ch.Close()
-
-	err = ch.ExchangeDeclare(
-		"task_exchange", // name
-		"fanout",        // type
-		true,            // durable
-		false,           // auto deleted
-		false,           // internal
-		false,           // no-wait
-		nil,             // arguments
+func (publisher *publisher) Publish(order domain.Order) error {
+	var err = publisher.Channel.ExchangeDeclare(
+		"orders_topic", // name
+		"topic",        // type
+		true,           // durable
+		false,          // auto deleted
+		false,          // internal
+		false,          // no-wait
+		nil,            // arguments
 	)
 	failOnError(err, "Failed to declare an exchange")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	buf := "Message " + os.Args[1]
+	message, err := json.Marshal(order)
+	failOnError(err, "Failed to encode")
 
-	err = ch.PublishWithContext(ctx,
-		"task_exchange", // exchange
-		"",              // routing key
-		false,           // mandatory
-		false,           // immediate
+	var priority = strconv.Itoa(order.Priority)
+
+	err = publisher.Channel.PublishWithContext(ctx,
+		"orders_topic",                     // exchange
+		"kitchen."+order.Type+"."+priority, // routing key
+		false,                              // mandatory
+		false,                              // immediate
 		amqp.Publishing{
-			// DeliveryMode: amqp.Persistent,
-			ContentType: "text/plain",
-			Body:        []byte(buf),
+			DeliveryMode: amqp.Persistent,
+			ContentType:  "text/plain",
+			Body:         []byte(message),
 		},
 	)
 	failOnError(err, "Failed to publish a message")
 
-	fmt.Println("Sent")
+	return nil
+}
+
+func (publisher *publisher) Close() {
+	publisher.Conn.Close()
+	publisher.Channel.Close()
 }

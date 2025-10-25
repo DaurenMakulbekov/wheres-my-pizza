@@ -13,11 +13,13 @@ import (
 
 type service struct {
 	orderRepository ports.OrderRepository
+	publisher       ports.Publisher
 }
 
-func NewOrderService(repository ports.OrderRepository) *service {
+func NewOrderService(orderRepo ports.OrderRepository, publisherRepo ports.Publisher) *service {
 	return &service{
-		orderRepository: repository,
+		orderRepository: orderRepo,
+		publisher:       publisherRepo,
 	}
 }
 
@@ -160,6 +162,11 @@ func (service *service) CreateOrder(order domain.Order) (domain.Result, error, e
 	order.Status = "received"
 
 	err = service.orderRepository.CreateOrder(order)
+	if err != nil {
+		return result, domain.InternalServerError, err
+	}
+
+	err = service.publisher.Publish(order)
 	if err != nil {
 		return result, domain.InternalServerError, err
 	}

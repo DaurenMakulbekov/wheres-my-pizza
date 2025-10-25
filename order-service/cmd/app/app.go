@@ -10,6 +10,7 @@ import (
 	"time"
 	"wheres-my-pizza/order-service/internal/adapters/handlers"
 	"wheres-my-pizza/order-service/internal/adapters/repositories/postgres"
+	"wheres-my-pizza/order-service/internal/adapters/repositories/rabbitmq"
 	"wheres-my-pizza/order-service/internal/core/services"
 	"wheres-my-pizza/order-service/internal/infrastructure/config"
 
@@ -26,7 +27,8 @@ func Run() {
 	}
 
 	var orderRepository = postgres.NewOrderRepository(db)
-	var orderService = services.NewOrderService(orderRepository)
+	var publisher = rabbitmq.NewRabbitMQRepository(config.RabbitMQ)
+	var orderService = services.NewOrderService(orderRepository, publisher)
 	var handler = handlers.NewOrderHandler(orderRepository, orderService)
 
 	server := &http.Server{

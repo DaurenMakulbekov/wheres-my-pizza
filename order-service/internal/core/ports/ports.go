@@ -12,3 +12,7 @@ type OrderRepository interface {
 	CreateOrder(order domain.Order) error
 	GetOrderNumber() (string, error)
 }
+
+type Publisher interface {
+	Publish(order domain.Order) error
+}
