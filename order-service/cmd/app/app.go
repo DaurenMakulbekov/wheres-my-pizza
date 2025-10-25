@@ -17,7 +17,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
-func Run() {
+func Run(port string, maxConcurrent int) {
 	config := config.NewAppConfig()
 	ctx := context.Background()
 
@@ -32,7 +32,7 @@ func Run() {
 	var handler = handlers.NewOrderHandler(orderRepository, orderService)
 
 	server := &http.Server{
-		Addr:    ":8080",
+		Addr:    ":" + port,
 		Handler: handler.Routes(),
 	}
 
