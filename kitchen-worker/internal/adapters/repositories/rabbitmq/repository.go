@@ -1,0 +1,149 @@
+package rabbitmq
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"time"
+	"wheres-my-pizza/kitchen-worker/internal/infrastructure/config"
+
+	amqp "github.com/rabbitmq/amqp091-go"
+)
+
+type consumer struct {
+	Conn      *amqp.Connection
+	Channel   *amqp.Channel
+	url       string
+	ctx       context.Context
+	ctxCansel context.CancelFunc
+}
+
+func NewRabbitMQRepository(config *config.RabbitMQ, ctxMain context.Context) *consumer {
+	ctx, ctxCansel := context.WithCancel(ctxMain)
+	var url = fmt.Sprintf("amqp://%s:%s@%s:%s/", config.User, config.Password, config.Host, config.Port)
+
+	conn, err := amqp.Dial(url)
+	if err != nil {
+		log.Fatalf("Failed to connect to RabbitMQ: %v", err)
+	}
+
+	ch, err := conn.Channel()
+	if err != nil {
+		log.Fatalf("Failed to open a channel: %v", err)
+	}
+
+	return &consumer{
+		Conn:      conn,
+		Channel:   ch,
+		url:       url,
+		ctx:       ctx,
+		ctxCansel: ctxCansel,
+	}
+}
+
+func (consumer *consumer) RegisterConsumer() error {
+	var err = consumer.Channel.ExchangeDeclare(
+		"orders_topic", // name
+		"topic",        // type
+		true,           // durable
+		false,          // auto deleted
+		false,          // internal
+		false,          // no-wait
+		nil,            // arguments
+	)
+	if err != nil {
+		return fmt.Errorf("Failed to declare an exchange")
+	}
+
+	q, err := consumer.Channel.QueueDeclare(
+		"kitchen_queue", // name
+		false,           // durable
+		false,           // delete when unused
+		true,            // exclusive
+		false,           // no-wait
+		nil,             // arguments
+	)
+	if err != nil {
+		return fmt.Errorf("Failed to declare a queue")
+	}
+
+	err = consumer.Channel.QueueBind(
+		q.Name,                       // queue name
+		"kitchen."+"takeout"+"."+"1", // routing key
+		"orders_topic",               // exchange
+		false,
+		nil,
+	)
+	if err != nil {
+		return fmt.Errorf("Failed to bind a queue")
+	}
+
+	messages, err := consumer.Channel.Consume(
+		q.Name, // queue
+		"",     // consumer
+		false,  // auto-ack
+		false,  // exclusive
+		false,  // no-local
+		false,  // no-wait
+		nil,    // args
+	)
+	if err != nil {
+		return fmt.Errorf("Failed to register a consumer")
+	}
+
+	var forever = make(chan struct{})
+
+	go func() {
+		for d := range messages {
+
+			time.Sleep(time.Second)
+
+			fmt.Printf("Received a message: %s\n", d.Body)
+			d.Ack(false)
+		}
+	}()
+
+	fmt.Println("Waiting for messages. To exit press a CTRL+C")
+
+	<-forever
+
+	return nil
+}
+
+func (consumer *consumer) Reconnect() {
+	go func() {
+		for {
+			conn, err := amqp.Dial(consumer.url)
+			if err == nil {
+				ch, err := conn.Channel()
+				if err == nil {
+					consumer.Conn = conn
+					consumer.Channel = ch
+					break
+				}
+			}
+
+			if err != nil {
+				select {
+				case <-time.After(5 * time.Second):
+				case <-consumer.ctx.Done():
+					return
+				}
+			}
+		}
+	}()
+
+}
+
+func (consumer *consumer) IsClosed() (bool, bool) {
+	return consumer.Channel.IsClosed(), consumer.Conn.IsClosed()
+}
+
+func (consumer *consumer) Close() {
+	consumer.ctxCansel()
+
+	consumer.Channel.Close()
+	consumer.Conn.Close()
+
+	log.Println("Closed rabbitmq channel, connection")
+}
