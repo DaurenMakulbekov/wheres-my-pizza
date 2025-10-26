@@ -15,4 +15,7 @@ type OrderRepository interface {
 
 type Publisher interface {
 	Publish(order domain.Order) error
+	Reconnect()
+	IsClosed() (bool, bool)
+	Close()
 }

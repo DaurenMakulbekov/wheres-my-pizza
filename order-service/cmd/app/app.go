@@ -27,8 +27,8 @@ func Run(port string, maxConcurrent int) {
 	}
 
 	var orderRepository = postgres.NewOrderRepository(db)
-	var publisher = rabbitmq.NewRabbitMQRepository(config.RabbitMQ)
-	var orderService = services.NewOrderService(orderRepository, publisher)
+	var publisher = rabbitmq.NewRabbitMQRepository(config.RabbitMQ, ctx)
+	var orderService = services.NewOrderService(orderRepository, publisher, ctx)
 	var handler = handlers.NewOrderHandler(orderRepository, orderService)
 
 	server := &http.Server{
@@ -49,6 +49,8 @@ func Run(port string, maxConcurrent int) {
 
 	log.Println("Shutting down server...")
 	time.Sleep(5 * time.Second)
+
+	orderService.Close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

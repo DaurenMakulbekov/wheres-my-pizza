@@ -1,7 +1,9 @@
 package services
 
 import (
+	"context"
 	"fmt"
+	"log"
 	"os"
 	"slices"
 	"strconv"
@@ -14,12 +16,18 @@ import (
 type service struct {
 	orderRepository ports.OrderRepository
 	publisher       ports.Publisher
+	ctx             context.Context
+	ctxCansel       context.CancelFunc
 }
 
-func NewOrderService(orderRepo ports.OrderRepository, publisherRepo ports.Publisher) *service {
+func NewOrderService(orderRepo ports.OrderRepository, publisherRepo ports.Publisher, ctxMain context.Context) *service {
+	ctx, ctxCansel := context.WithCancel(ctxMain)
+
 	return &service{
 		orderRepository: orderRepo,
 		publisher:       publisherRepo,
+		ctx:             ctx,
+		ctxCansel:       ctxCansel,
 	}
 }
 
@@ -146,6 +154,27 @@ func SetOrderItemsCreatedAt(orderItems []domain.OrderItem) {
 	}
 }
 
+func (service *service) Push(message domain.Order) {
+	go func() {
+		service.publisher.Reconnect()
+		for {
+			select {
+			case <-time.After(5 * time.Second):
+				var err = service.publisher.Publish(message)
+				if err != nil {
+					continue
+				} else {
+					log.Println("Message published to RabbitMQ")
+
+					return
+				}
+			case <-service.ctx.Done():
+				return
+			}
+		}
+	}()
+}
+
 func (service *service) CreateOrder(order domain.Order) (domain.Result, error, error) {
 	var result domain.Result
 
@@ -166,7 +195,6 @@ func (service *service) CreateOrder(order domain.Order) (domain.Result, error, e
 
 	order.Number = service.CreateOrderNumber()
 	order.Status = "received"
-
 	order.CreatedAt = time.Now().UTC()
 	order.UpdatedAt = time.Now().UTC()
 	SetOrderItemsCreatedAt(order.Items)
@@ -178,8 +206,14 @@ func (service *service) CreateOrder(order domain.Order) (domain.Result, error, e
 
 	err = service.publisher.Publish(order)
 	if err != nil {
+		var chanClosed, connClosed = service.publisher.IsClosed()
+		if chanClosed && connClosed {
+			service.Push(order)
+		}
+
 		return result, domain.InternalServerError, err
 	}
+	log.Println("Message published to RabbitMQ")
 
 	result = domain.Result{
 		OrderNumber: order.Number,
@@ -188,4 +222,9 @@ func (service *service) CreateOrder(order domain.Order) (domain.Result, error, e
 	}
 
 	return result, nil, nil
+}
+
+func (service *service) Close() {
+	service.ctxCansel()
+	service.publisher.Close()
 }

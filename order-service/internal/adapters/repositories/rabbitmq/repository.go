@@ -14,11 +14,15 @@ import (
 )
 
 type publisher struct {
-	Conn    *amqp.Connection
-	Channel *amqp.Channel
+	Conn      *amqp.Connection
+	Channel   *amqp.Channel
+	url       string
+	ctx       context.Context
+	ctxCansel context.CancelFunc
 }
 
-func NewRabbitMQRepository(config *config.RabbitMQ) *publisher {
+func NewRabbitMQRepository(config *config.RabbitMQ, ctxMain context.Context) *publisher {
+	ctx, ctxCansel := context.WithCancel(ctxMain)
 	var url = fmt.Sprintf("amqp://%s:%s@%s:%s/", config.User, config.Password, config.Host, config.Port)
 
 	conn, err := amqp.Dial(url)
@@ -32,8 +36,11 @@ func NewRabbitMQRepository(config *config.RabbitMQ) *publisher {
 	}
 
 	return &publisher{
-		Conn:    conn,
-		Channel: ch,
+		Conn:      conn,
+		Channel:   ch,
+		url:       url,
+		ctx:       ctx,
+		ctxCansel: ctxCansel,
 	}
 }
 
@@ -79,7 +86,40 @@ func (publisher *publisher) Publish(order domain.Order) error {
 	return nil
 }
 
+func (publisher *publisher) Reconnect() {
+	go func() {
+		for {
+			conn, err := amqp.Dial(publisher.url)
+			if err == nil {
+				ch, err := conn.Channel()
+				if err == nil {
+					publisher.Conn = conn
+					publisher.Channel = ch
+					break
+				}
+			}
+
+			if err != nil {
+				select {
+				case <-time.After(5 * time.Second):
+				case <-publisher.ctx.Done():
+					return
+				}
+			}
+		}
+	}()
+
+}
+
+func (publisher *publisher) IsClosed() (bool, bool) {
+	return publisher.Channel.IsClosed(), publisher.Conn.IsClosed()
+}
+
 func (publisher *publisher) Close() {
-	publisher.Conn.Close()
+	publisher.ctxCansel()
+
 	publisher.Channel.Close()
+	publisher.Conn.Close()
+
+	log.Println("Closed rabbitmq channel, connection")
 }
