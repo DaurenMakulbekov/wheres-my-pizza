@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"os"
 	"strconv"
 	"time"
 	"wheres-my-pizza/order-service/internal/core/domain"
@@ -38,12 +37,6 @@ func NewRabbitMQRepository(config *config.RabbitMQ) *publisher {
 	}
 }
 
-func failOnError(err error, message string) {
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s: %v", message, err)
-	}
-}
-
 func (publisher *publisher) Publish(order domain.Order) error {
 	var err = publisher.Channel.ExchangeDeclare(
 		"orders_topic", // name
@@ -54,13 +47,17 @@ func (publisher *publisher) Publish(order domain.Order) error {
 		false,          // no-wait
 		nil,            // arguments
 	)
-	failOnError(err, "Failed to declare an exchange")
+	if err != nil {
+		return fmt.Errorf("Failed to declare an exchange")
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	message, err := json.Marshal(order)
-	failOnError(err, "Failed to encode")
+	if err != nil {
+		return fmt.Errorf(err.Error())
+	}
 
 	var priority = strconv.Itoa(order.Priority)
 
@@ -75,7 +72,9 @@ func (publisher *publisher) Publish(order domain.Order) error {
 			Body:         []byte(message),
 		},
 	)
-	failOnError(err, "Failed to publish a message")
+	if err != nil {
+		return fmt.Errorf("Failed to publish a message")
+	}
 
 	return nil
 }
