@@ -140,6 +140,12 @@ func (service *service) CreateOrderNumber() string {
 	return number
 }
 
+func SetOrderItemsCreatedAt(orderItems []domain.OrderItem) {
+	for i := range orderItems {
+		orderItems[i].CreatedAt = time.Now().UTC()
+	}
+}
+
 func (service *service) CreateOrder(order domain.Order) (domain.Result, error, error) {
 	var result domain.Result
 
@@ -160,6 +166,10 @@ func (service *service) CreateOrder(order domain.Order) (domain.Result, error, e
 
 	order.Number = service.CreateOrderNumber()
 	order.Status = "received"
+
+	order.CreatedAt = time.Now().UTC()
+	order.UpdatedAt = time.Now().UTC()
+	SetOrderItemsCreatedAt(order.Items)
 
 	err = service.orderRepository.CreateOrder(order)
 	if err != nil {

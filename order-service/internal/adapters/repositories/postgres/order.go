@@ -41,10 +41,10 @@ func (orderRepo *orderRepository) CreateOrder(order domain.Order) error {
 	}
 	defer tx.Rollback()
 
-	var query = `INSERT INTO orders (number, customer_name, type, total_amount) VALUES($1, $2, $3, $4) RETURNING id`
+	var query = `INSERT INTO orders (number, customer_name, type, table_number, delivery_address, total_amount, priority, created_at, updated_at) VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`
 	var orderID int64
 
-	err = tx.QueryRow(query, order.Number, order.CustomerName, order.Type, order.TotalAmount).Scan(&orderID)
+	err = tx.QueryRow(query, order.Number, order.CustomerName, order.Type, order.TableNumber, order.DeliveryAddress, order.TotalAmount, order.Priority, order.CreatedAt, order.UpdatedAt).Scan(&orderID)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return fmt.Errorf("Error: create order: %v", err)
@@ -53,17 +53,17 @@ func (orderRepo *orderRepository) CreateOrder(order domain.Order) error {
 	}
 
 	for i := range order.Items {
-		query = `INSERT INTO order_items (name, quantity, price, order_id) VALUES($1, $2, $3, $4)`
+		query = `INSERT INTO order_items (name, quantity, price, created_at, order_id) VALUES($1, $2, $3, $4, $5)`
 
-		_, err = tx.Exec(query, order.Items[i].Name, order.Items[i].Quantity, order.Items[i].Price, orderID)
+		_, err = tx.Exec(query, order.Items[i].Name, order.Items[i].Quantity, order.Items[i].Price, order.Items[i].CreatedAt, orderID)
 		if err != nil {
 			return fmt.Errorf("Error: write order items: %v", err)
 		}
 	}
 
-	query = `INSERT INTO order_status_log (status, order_id) VALUES($1, $2)`
+	query = `INSERT INTO order_status_log (status, created_at, changed_at, order_id) VALUES($1, $2, $3, $4)`
 
-	_, err = tx.Exec(query, order.Status, orderID)
+	_, err = tx.Exec(query, order.Status, order.CreatedAt, order.UpdatedAt, orderID)
 	if err != nil {
 		return fmt.Errorf("Error: write order status: %v", err)
 	}
