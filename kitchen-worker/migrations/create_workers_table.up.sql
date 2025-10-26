@@ -1,0 +1,9 @@
+CREATE TABLE workers (
+  id SERIAL PRIMARY KEY,
+  name TEXT UNIQUE NOT NULL,
+  type TEXT NOT NULL,
+  status TEXT DEFAULT 'online',
+  orders_processed INTEGER DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_seen TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
