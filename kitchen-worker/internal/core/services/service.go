@@ -6,7 +6,7 @@ import (
 	"slices"
 	"strings"
 
-	//"wheres-my-pizza/kitchen-worker/internal/core/domain"
+	"wheres-my-pizza/kitchen-worker/internal/core/domain"
 	"wheres-my-pizza/kitchen-worker/internal/core/ports"
 )
 
@@ -80,11 +80,28 @@ func (service *service) Register(workerName, orderTypes string, heartbeatInterva
 		return err
 	}
 
-	//var worker domain.Worker
-	//var err = service.database.Register(worker)
-	//if err != nil {
-	//	return err
-	//}
+	var worker = domain.Worker{
+		Name: workerName,
+		Type: orderTypes,
+	}
+
+	user, err := service.database.GetWorker(workerName)
+	if err != nil {
+		err = service.database.Register(worker)
+		if err != nil {
+			return err
+		}
+	}
+
+	if user.Status == "online" {
+		return fmt.Errorf("Worker is already online")
+	} else {
+		worker.Status = "online"
+		var err = service.database.UpdateWorker(worker)
+		if err != nil {
+			return err
+		}
+	}
 
 	return nil
 }

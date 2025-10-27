@@ -10,6 +10,8 @@ type ConsumerService interface {
 
 type Database interface {
 	Register(worker domain.Worker) error
+	GetWorker(name string) (domain.Worker, error)
+	UpdateWorker(worker domain.Worker) error
 }
 
 type Consumer interface {
