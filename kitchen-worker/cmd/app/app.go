@@ -29,7 +29,7 @@ func Run(workerName, orderTypes string, heartbeatInterval, prefetch int) {
 	var consumerService = services.NewConsumerService(database, consumer, ctx)
 	var handler = handlers.NewConsumerHandler(consumerService)
 
-	handler.WorkerHandler(workerName, orderTypes, heartbeatInterval, prefetch)
+	handler.RegisterHandler(workerName, orderTypes, heartbeatInterval, prefetch)
 
 	signalCtx, signalCtxStop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGTSTP)
 	defer signalCtxStop()
@@ -37,12 +37,8 @@ func Run(workerName, orderTypes string, heartbeatInterval, prefetch int) {
 	<-signalCtx.Done()
 
 	log.Println("Shutting down process...")
-	time.Sleep(5 * time.Second)
-
 	consumerService.Close()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	time.Sleep(5 * time.Second)
 
 	log.Println("Process shutdown complete")
 }

@@ -2,8 +2,11 @@ package services
 
 import (
 	"context"
-	"time"
-	"wheres-my-pizza/kitchen-worker/internal/core/domain"
+	"fmt"
+	"slices"
+	"strings"
+
+	//"wheres-my-pizza/kitchen-worker/internal/core/domain"
 	"wheres-my-pizza/kitchen-worker/internal/core/ports"
 )
 
@@ -25,34 +28,65 @@ func NewConsumerService(database ports.Database, consumerRepo ports.Consumer, ct
 	}
 }
 
-func (service *service) Push(message domain.Order) {
-	go func() {
-		service.consumer.Reconnect()
-		for {
-			select {
-			case <-time.After(5 * time.Second):
-				//var err = service.consumer.Publish(message)
-				//if err != nil {
-				//	continue
-				//} else {
-				//	log.Println("Message published to RabbitMQ")
-
-				//	return
-				//}
-			case <-service.ctx.Done():
-				return
-			}
-		}
-	}()
-}
-
-func (service *service) Register(worker domain.Worker) (error, error) {
-	var err = service.database.Register(worker)
-	if err != nil {
-		return domain.ErrorBadRequest, err
+func CheckWorkerName(name string) error {
+	if len(name) < 1 || len(name) > 100 {
+		return fmt.Errorf("Incorrect worker name. Must be 1 - 100 characters.")
 	}
 
-	return nil, nil
+	for i := range name {
+		if name[i] >= 65 && name[i] <= 90 || name[i] >= 97 && name[i] <= 122 {
+			continue
+		} else if name[i] == 32 || name[i] == 45 || name[i] == 34 || name[i] == 39 {
+			continue
+		} else {
+			return fmt.Errorf("Incorrect worker name. Must not contain special characters other than spaces, hyphens and apostrophes.")
+		}
+	}
+
+	return nil
+}
+
+func GetOrderTypes(orderTypes string) []string {
+	var result1 = strings.Split(orderTypes, ",")
+	var result []string
+
+	for i := range result1 {
+		var value = strings.Trim(result1[i], " ")
+		result = append(result, value)
+	}
+
+	return result
+}
+
+func CheckOrderTypes(orderTypes []string) error {
+	for i := range orderTypes {
+		if !slices.Contains([]string{"dine_in", "takeout", "delivery"}, orderTypes[i]) {
+			return fmt.Errorf("Incorrect order type. Must be one of: 'dine_in', 'takeout', 'delivery'")
+		}
+	}
+
+	return nil
+}
+
+func (service *service) Register(workerName, orderTypes string, heartbeatInterval, prefetch int) error {
+	if err := CheckWorkerName(workerName); err != nil {
+		return err
+	}
+
+	var result = GetOrderTypes(orderTypes)
+
+	var err = CheckOrderTypes(result)
+	if err != nil {
+		return err
+	}
+
+	//var worker domain.Worker
+	//var err = service.database.Register(worker)
+	//if err != nil {
+	//	return err
+	//}
+
+	return nil
 }
 
 func (service *service) Close() {

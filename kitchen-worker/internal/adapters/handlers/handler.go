@@ -1,10 +1,8 @@
 package handlers
 
 import (
-	"errors"
 	"log/slog"
 	"os"
-	"wheres-my-pizza/kitchen-worker/internal/core/domain"
 	"wheres-my-pizza/kitchen-worker/internal/core/ports"
 )
 
@@ -18,9 +16,7 @@ func NewConsumerHandler(service ports.ConsumerService) *handler {
 	}
 }
 
-func (hd *handler) WorkerHandler(workerName, orderTypes string, heartbeatInterval, prefetch int) {
-	var worker domain.Worker
-
+func (hd *handler) RegisterHandler(workerName, orderTypes string, heartbeatInterval, prefetch int) {
 	var opts = &slog.HandlerOptions{
 		Level: slog.LevelDebug,
 		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
@@ -37,17 +33,10 @@ func (hd *handler) WorkerHandler(workerName, orderTypes string, heartbeatInterva
 	var logger = slog.New(slog.NewJSONHandler(os.Stdout, opts))
 	slog.SetDefault(logger)
 
-	err, _ := hd.consumerService.Register(worker)
+	var err = hd.consumerService.Register(workerName, orderTypes, heartbeatInterval, prefetch)
 	if err != nil {
-		if errors.Is(err, domain.ErrorBadRequest) {
-
-			slog.Error("Worker registration failed", "service", "kitchen-worker", "hostname", "kitchen-worker", "request_id", "worker_registration", "action", "worker_registration_failed", slog.Any("error", err))
-		} else if errors.Is(err, domain.InternalServerError) {
-
-			slog.Error("Failed to register worker", "service", "kitchen-worker", "hostname", "kitchen-worker", "request_id", "worker_registration", "action", "db_connection_failed", slog.Any("error", err))
-		}
-
-		return
+		slog.Error("Worker registration failed", "service", "kitchen-worker", "hostname", "kitchen-worker", "request_id", "worker_registration", "action", "worker_registration_failed", slog.Any("error", err))
+		os.Exit(1)
 	}
 
 	slog.Info("Worker successfully registered", "service", "kitchen-worker", "hostname", "kitchen-worker", "request_id", "worker_registration", "action", "worker_registered")

@@ -5,7 +5,7 @@ import (
 )
 
 type ConsumerService interface {
-	Register(worker domain.Worker) (error, error)
+	Register(workerName, orderTypes string, heartbeatInterval, prefetch int) error
 }
 
 type Database interface {
