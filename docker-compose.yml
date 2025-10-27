@@ -23,8 +23,10 @@ services:
       retries: 5
       start_period: 30s
     volumes:
-      - ./order-service/migrations:/docker-entrypoint-initdb.d
-      - ./kitchen-worker/migrations:/docker-entrypoint-initdb.d
+      - ./order-service/migrations/create_orders_table_down.sql:/docker-entrypoint-initdb.d/create_orders_table_down.sql
+      - ./order-service/migrations/create_orders_table_up.sql:/docker-entrypoint-initdb.d/create_orders_table_up.sql
+      - ./kitchen-worker/migrations/create_workers_table_down.sql:/docker-entrypoint-initdb.d/create_workers_table_down.sql
+      - ./kitchen-worker/migrations/create_workers_table_up.sql:/docker-entrypoint-initdb.d/create_workers_table_up.sql
 
   rabbitmq:
     image: rabbitmq:management
