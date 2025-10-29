@@ -2,9 +2,11 @@ package rabbitmq
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"time"
+	"wheres-my-pizza/kitchen-worker/internal/core/domain"
 	"wheres-my-pizza/kitchen-worker/internal/infrastructure/config"
 
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -116,6 +118,46 @@ func (consumer *consumer) ReadMessages(orderType string, prefetch int, out chan 
 			}
 		}
 	}()
+
+	return nil
+}
+
+func (consumer *consumer) PublishStatusUpdate(message domain.Message) error {
+	var err = consumer.Channel.ExchangeDeclare(
+		"notifications_fanout", // name
+		"fanout",               // type
+		true,                   // durable
+		false,                  // auto deleted
+		false,                  // internal
+		false,                  // no-wait
+		nil,                    // arguments
+	)
+	if err != nil {
+		return fmt.Errorf("Failed to declare an exchange")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	msg, err := json.Marshal(message)
+	if err != nil {
+		return fmt.Errorf(err.Error())
+	}
+
+	err = consumer.Channel.PublishWithContext(ctx,
+		"notifications_fanout", // exchange
+		"",                     // routing key
+		false,                  // mandatory
+		false,                  // immediate
+		amqp.Publishing{
+			DeliveryMode: amqp.Persistent,
+			ContentType:  "text/plain",
+			Body:         []byte(msg),
+		},
+	)
+	if err != nil {
+		return fmt.Errorf("Failed to publish a message")
+	}
 
 	return nil
 }

@@ -7,6 +7,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"time"
 
 	"wheres-my-pizza/kitchen-worker/internal/core/domain"
 	"wheres-my-pizza/kitchen-worker/internal/core/ports"
@@ -17,6 +18,7 @@ type service struct {
 	consumer          ports.Consumer
 	ctx               context.Context
 	ctxCansel         context.CancelFunc
+	worker            domain.Worker
 	orderTypes        []string
 	heartbeatInterval int
 	prefetch          int
@@ -121,6 +123,7 @@ func (service *service) Register(workerName, orderTypes string, heartbeatInterva
 		}
 	}
 
+	service.worker = worker
 	service.heartbeatInterval = heartbeatInterval
 	service.prefetch = prefetch
 
@@ -157,13 +160,43 @@ func (service *service) Start() error {
 				fmt.Fprintln(os.Stderr, "Error decode:", err)
 			}
 
-			//time.Sleep(5 * time.Second)
-
 			//if slices.Contains(orderTypes, order.Type) {
 			//	m[order.Type] <- false
 			//} else {
 			//	m[order.Type] <- true
 			//}
+
+			err = service.database.UpdateOrder(service.worker, order)
+			if err != nil {
+				m[order.Type] <- true
+			}
+
+			// Publish status message
+			var messageStatus = domain.Message{
+				OrderNumber:         order.Number,
+				OldStatus:           "received",
+				NewStatus:           "cooking",
+				ChangedBy:           service.worker.Name,
+				Timestamp:           time.Now(),
+				EstimatedCompletion: time.Now().Add(10 * time.Second),
+			}
+			err = service.consumer.PublishStatusUpdate(messageStatus)
+			if err != nil {
+				m[order.Type] <- true
+			}
+
+			if order.Type == "dine_in" {
+				time.Sleep(8 * time.Second)
+			} else if order.Type == "takeout" {
+				time.Sleep(10 * time.Second)
+			} else if order.Type == "delivery" {
+				time.Sleep(12 * time.Second)
+			}
+
+			err = service.database.UpdateOrderReady(service.worker, order)
+			if err != nil {
+				m[order.Type] <- true
+			}
 		}
 	}
 }
