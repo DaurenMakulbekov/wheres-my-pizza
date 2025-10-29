@@ -3,6 +3,7 @@ package postgres
 import (
 	"database/sql"
 	"fmt"
+	"time"
 	"wheres-my-pizza/kitchen-worker/internal/core/domain"
 	"wheres-my-pizza/kitchen-worker/internal/infrastructure/config"
 )
@@ -66,6 +67,69 @@ func (database *database) UpdateWorker(worker domain.Worker) error {
 	_, err := database.db.Exec(query, worker.Status, worker.Type, worker.Name)
 	if err != nil {
 		return fmt.Errorf("Error: update worker status: %v", err)
+	}
+
+	return nil
+}
+
+func (database *database) UpdateOrder(worker domain.Worker, order domain.Order) error {
+	tx, err := database.db.Begin()
+	if err != nil {
+		return fmt.Errorf("Error Transaction Begin: %v", err)
+	}
+	defer tx.Rollback()
+
+	var query = `UPDATE orders SET status = 'cooking', processed_by = $1, updated_at = $2 WHERE number = $3`
+
+	_, err = tx.Exec(query, worker.Name, time.Now(), order.Number)
+	if err != nil {
+		return fmt.Errorf("Error: update order: %v", err)
+	}
+
+	query = `UPDATE order_status_log SET status = 'cooking', changed_by = $1, changed_at = $2 WHERE order_id = $3`
+
+	_, err = tx.Exec(query, worker.Name, time.Now(), order.ID)
+	if err != nil {
+		return fmt.Errorf("Error: update order status: %v", err)
+	}
+
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("Error Transaction Commit: %v", err)
+	}
+
+	return nil
+}
+
+func (database *database) UpdateOrderReady(worker domain.Worker, order domain.Order) error {
+	tx, err := database.db.Begin()
+	if err != nil {
+		return fmt.Errorf("Error Transaction Begin: %v", err)
+	}
+	defer tx.Rollback()
+
+	var query = `UPDATE orders SET status = 'ready', completed_at = $1 WHERE number = $2`
+
+	_, err = tx.Exec(query, time.Now(), order.Number)
+	if err != nil {
+		return fmt.Errorf("Error: update order: %v", err)
+	}
+
+	query = `UPDATE order_status_log SET status = 'ready', changed_at = $1 WHERE order_id = $2`
+
+	_, err = tx.Exec(query, time.Now(), order.ID)
+	if err != nil {
+		return fmt.Errorf("Error: update order status: %v", err)
+	}
+
+	query = `UPDATE workers SET orders_processed += 1 WHERE name = $1`
+
+	_, err = tx.Exec(query, worker.Name)
+	if err != nil {
+		return fmt.Errorf("Error: update worker 'orders_processed': %v", err)
+	}
+
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("Error Transaction Commit: %v", err)
 	}
 
 	return nil
