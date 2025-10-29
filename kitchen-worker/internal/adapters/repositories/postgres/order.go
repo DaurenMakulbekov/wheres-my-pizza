@@ -86,11 +86,11 @@ func (database *database) UpdateOrder(worker domain.Worker, order domain.Order) 
 		return fmt.Errorf("Error: update order: %v", err)
 	}
 
-	query = `UPDATE order_status_log SET status = 'cooking', changed_by = $1, changed_at = $2 WHERE order_id = $3`
+	query = `INSERT INTO order_status_log (status, changed_by, order_id) VALUES('cooking', $1, $2)`
 
-	_, err = tx.Exec(query, worker.Name, time.Now(), order.ID)
+	_, err = tx.Exec(query, worker.Name, order.ID)
 	if err != nil {
-		return fmt.Errorf("Error: update order status: %v", err)
+		return fmt.Errorf("Error: write order status: %v", err)
 	}
 
 	if err = tx.Commit(); err != nil {
@@ -114,18 +114,18 @@ func (database *database) UpdateOrderReady(worker domain.Worker, order domain.Or
 		return fmt.Errorf("Error: update order: %v", err)
 	}
 
-	query = `UPDATE order_status_log SET status = 'ready', changed_at = $1 WHERE order_id = $2`
+	query = `INSERT INTO order_status_log (status, changed_by, order_id) VALUES('ready', $1, $2)`
 
-	_, err = tx.Exec(query, time.Now(), order.ID)
+	_, err = tx.Exec(query, worker.Name, order.ID)
 	if err != nil {
-		return fmt.Errorf("Error: update order status: %v", err)
+		return fmt.Errorf("Error: write order status: %v", err)
 	}
 
-	query = `UPDATE workers SET orders_processed += 1 WHERE name = $1`
+	query = `UPDATE workers SET orders_processed = orders_processed + 1 WHERE name = $1`
 
 	_, err = tx.Exec(query, worker.Name)
 	if err != nil {
-		return fmt.Errorf("Error: update worker 'orders_processed': %v", err)
+		return fmt.Errorf("Error: update worker: %v", err)
 	}
 
 	if err = tx.Commit(); err != nil {
