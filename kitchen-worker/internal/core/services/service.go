@@ -2,7 +2,9 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 
@@ -11,20 +13,25 @@ import (
 )
 
 type service struct {
-	database  ports.Database
-	consumer  ports.Consumer
-	ctx       context.Context
-	ctxCansel context.CancelFunc
+	database          ports.Database
+	consumer          ports.Consumer
+	ctx               context.Context
+	ctxCansel         context.CancelFunc
+	orderTypes        []string
+	heartbeatInterval int
+	prefetch          int
 }
 
 func NewConsumerService(database ports.Database, consumerRepo ports.Consumer, ctxMain context.Context) *service {
 	ctx, ctxCansel := context.WithCancel(ctxMain)
+	var orderTypes = []string{"dine_in", "takeout", "delivery"}
 
 	return &service{
-		database:  database,
-		consumer:  consumerRepo,
-		ctx:       ctx,
-		ctxCansel: ctxCansel,
+		database:   database,
+		consumer:   consumerRepo,
+		ctx:        ctx,
+		ctxCansel:  ctxCansel,
+		orderTypes: orderTypes,
 	}
 }
 
@@ -73,11 +80,22 @@ func (service *service) Register(workerName, orderTypes string, heartbeatInterva
 		return err
 	}
 
-	var result = GetOrderTypes(orderTypes)
+	if len(orderTypes) > 0 {
+		var result = GetOrderTypes(orderTypes)
 
-	var err = CheckOrderTypes(result)
-	if err != nil {
-		return err
+		var err = CheckOrderTypes(result)
+		if err != nil {
+			return err
+		}
+
+		service.orderTypes = result
+	}
+
+	if heartbeatInterval < 1 || heartbeatInterval > 600 {
+		return fmt.Errorf("heartbeat-interval must be between 1 and 600 seconds")
+	}
+	if prefetch < 1 || prefetch > 5 {
+		return fmt.Errorf("prefetch count must be between 1 and 5")
 	}
 
 	var worker = domain.Worker{
@@ -103,7 +121,51 @@ func (service *service) Register(workerName, orderTypes string, heartbeatInterva
 		}
 	}
 
+	service.heartbeatInterval = heartbeatInterval
+	service.prefetch = prefetch
+
 	return nil
+}
+
+func (service *service) Start() error {
+	var orderTypes = service.orderTypes
+	var out = make(chan string)
+	defer close(out)
+	var m = make(map[string]chan bool)
+
+	for i := range orderTypes {
+		var done = make(chan bool)
+		m[orderTypes[i]] = done
+		defer close(done)
+
+		var err = service.consumer.ReadMessages(orderTypes[i], service.prefetch, out, done)
+		if err != nil {
+			return err
+		}
+	}
+
+	for {
+		select {
+		case <-service.ctx.Done():
+			return nil
+		case message := <-out:
+			var order domain.Order
+			decoder := json.NewDecoder(strings.NewReader(message))
+
+			err := decoder.Decode(&order)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "Error decode:", err)
+			}
+
+			//time.Sleep(5 * time.Second)
+
+			//if slices.Contains(orderTypes, order.Type) {
+			//	m[order.Type] <- false
+			//} else {
+			//	m[order.Type] <- true
+			//}
+		}
+	}
 }
 
 func (service *service) Close() {

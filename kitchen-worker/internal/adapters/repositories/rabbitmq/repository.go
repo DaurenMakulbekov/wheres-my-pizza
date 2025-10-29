@@ -41,7 +41,7 @@ func NewRabbitMQRepository(config *config.RabbitMQ, ctxMain context.Context) *co
 	}
 }
 
-func (consumer *consumer) RegisterConsumer() error {
+func (consumer *consumer) ReadMessages(orderType string, prefetch int, out chan string, done chan bool) error {
 	var err = consumer.Channel.ExchangeDeclare(
 		"orders_topic", // name
 		"topic",        // type
@@ -56,12 +56,12 @@ func (consumer *consumer) RegisterConsumer() error {
 	}
 
 	q, err := consumer.Channel.QueueDeclare(
-		"kitchen_queue", // name
-		false,           // durable
-		false,           // delete when unused
-		true,            // exclusive
-		false,           // no-wait
-		nil,             // arguments
+		"kitchen_"+orderType+"_queue", // name
+		true,                          // durable
+		false,                         // delete when unused
+		false,                         // exclusive
+		false,                         // no-wait
+		nil,                           // arguments
 	)
 	if err != nil {
 		return fmt.Errorf("Failed to declare a queue")
@@ -69,13 +69,22 @@ func (consumer *consumer) RegisterConsumer() error {
 
 	err = consumer.Channel.QueueBind(
 		q.Name,                       // queue name
-		"kitchen."+"takeout"+"."+"1", // routing key
+		"kitchen."+orderType+"."+"*", // routing key
 		"orders_topic",               // exchange
 		false,
 		nil,
 	)
 	if err != nil {
 		return fmt.Errorf("Failed to bind a queue")
+	}
+
+	err = consumer.Channel.Qos(
+		prefetch, // prefetch count
+		0,        // prefetch size
+		false,    // global
+	)
+	if err != nil {
+		return fmt.Errorf("Failed to set QoS")
 	}
 
 	messages, err := consumer.Channel.Consume(
@@ -91,21 +100,22 @@ func (consumer *consumer) RegisterConsumer() error {
 		return fmt.Errorf("Failed to register a consumer")
 	}
 
-	var forever = make(chan struct{})
-
 	go func() {
 		for d := range messages {
+			out <- string(d.Body)
 
-			time.Sleep(time.Second)
-
-			fmt.Printf("Received a message: %s\n", d.Body)
-			d.Ack(false)
+			select {
+			case requeue := <-done:
+				if requeue {
+					d.Nack(true, true)
+				} else {
+					d.Ack(false)
+				}
+			case <-consumer.ctx.Done():
+				return
+			}
 		}
 	}()
-
-	fmt.Println("Waiting for messages. To exit press a CTRL+C")
-
-	<-forever
 
 	return nil
 }
