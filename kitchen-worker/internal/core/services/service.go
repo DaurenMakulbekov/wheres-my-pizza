@@ -130,6 +130,26 @@ func (service *service) Register(workerName, orderTypes string, heartbeatInterva
 	return nil
 }
 
+func (service *service) CreateMessage(order domain.Order, oldStatus, newStatus string) domain.Message {
+	var message = domain.Message{
+		OrderNumber: order.Number,
+		OldStatus:   oldStatus,
+		NewStatus:   newStatus,
+		ChangedBy:   service.worker.Name,
+		Timestamp:   time.Now(),
+	}
+
+	if order.Type == "dine_in" {
+		message.EstimatedCompletion = time.Now().Add(8 * time.Second)
+	} else if order.Type == "takeout" {
+		message.EstimatedCompletion = time.Now().Add(10 * time.Second)
+	} else if order.Type == "delivery" {
+		message.EstimatedCompletion = time.Now().Add(12 * time.Second)
+	}
+
+	return message
+}
+
 func (service *service) Start() error {
 	var orderTypes = service.orderTypes
 	var out = make(chan string)
@@ -160,29 +180,23 @@ func (service *service) Start() error {
 				fmt.Fprintln(os.Stderr, "Error decode:", err)
 			}
 
-			//if slices.Contains(orderTypes, order.Type) {
-			//	m[order.Type] <- false
-			//} else {
-			//	m[order.Type] <- true
-			//}
+			if !slices.Contains(orderTypes, order.Type) {
+				m[order.Type] <- true
+				continue
+			}
 
 			err = service.database.UpdateOrder(service.worker, order)
 			if err != nil {
 				m[order.Type] <- true
+				continue
 			}
 
-			// Publish status message
-			var messageStatus = domain.Message{
-				OrderNumber:         order.Number,
-				OldStatus:           "received",
-				NewStatus:           "cooking",
-				ChangedBy:           service.worker.Name,
-				Timestamp:           time.Now(),
-				EstimatedCompletion: time.Now().Add(10 * time.Second),
-			}
-			err = service.consumer.PublishStatusUpdate(messageStatus)
+			var msg = service.CreateMessage(order, "received", "cooking")
+
+			err = service.consumer.PublishStatusUpdate(msg)
 			if err != nil {
 				m[order.Type] <- true
+				continue
 			}
 
 			if order.Type == "dine_in" {
@@ -193,10 +207,21 @@ func (service *service) Start() error {
 				time.Sleep(12 * time.Second)
 			}
 
+			msg = service.CreateMessage(order, "cooking", "ready")
+
+			err = service.consumer.PublishStatusUpdate(msg)
+			if err != nil {
+				m[order.Type] <- true
+				continue
+			}
+
 			err = service.database.UpdateOrderReady(service.worker, order)
 			if err != nil {
 				m[order.Type] <- true
+				continue
 			}
+
+			m[order.Type] <- false
 		}
 	}
 }
