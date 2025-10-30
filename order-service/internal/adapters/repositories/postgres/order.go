@@ -34,22 +34,23 @@ func NewOrderRepository(db *sql.DB) *orderRepository {
 	}
 }
 
-func (orderRepo *orderRepository) CreateOrder(order domain.Order) error {
+func (orderRepo *orderRepository) CreateOrder(order domain.Order) (int64, error) {
+	var orderID int64
+
 	tx, err := orderRepo.db.Begin()
 	if err != nil {
-		return fmt.Errorf("Error Transaction Begin: %v", err)
+		return orderID, fmt.Errorf("Error Transaction Begin: %v", err)
 	}
 	defer tx.Rollback()
 
 	var query = `INSERT INTO orders (number, customer_name, type, table_number, delivery_address, total_amount, priority, created_at, updated_at) VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`
-	var orderID int64
 
 	err = tx.QueryRow(query, order.Number, order.CustomerName, order.Type, order.TableNumber, order.DeliveryAddress, order.TotalAmount, order.Priority, order.CreatedAt, order.UpdatedAt).Scan(&orderID)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return fmt.Errorf("Error: create order: %v", err)
+			return orderID, fmt.Errorf("Error: create order: %v", err)
 		}
-		return fmt.Errorf("Error: create order: %v", err)
+		return orderID, fmt.Errorf("Error: create order: %v", err)
 	}
 
 	for i := range order.Items {
@@ -57,7 +58,7 @@ func (orderRepo *orderRepository) CreateOrder(order domain.Order) error {
 
 		_, err = tx.Exec(query, order.Items[i].Name, order.Items[i].Quantity, order.Items[i].Price, order.Items[i].CreatedAt, orderID)
 		if err != nil {
-			return fmt.Errorf("Error: write order items: %v", err)
+			return orderID, fmt.Errorf("Error: write order items: %v", err)
 		}
 	}
 
@@ -65,14 +66,14 @@ func (orderRepo *orderRepository) CreateOrder(order domain.Order) error {
 
 	_, err = tx.Exec(query, order.Status, order.CreatedAt, order.UpdatedAt, orderID)
 	if err != nil {
-		return fmt.Errorf("Error: write order status: %v", err)
+		return orderID, fmt.Errorf("Error: write order status: %v", err)
 	}
 
 	if err = tx.Commit(); err != nil {
-		return fmt.Errorf("Error Transaction Commit: %v", err)
+		return orderID, fmt.Errorf("Error Transaction Commit: %v", err)
 	}
 
-	return nil
+	return orderID, nil
 }
 
 func (orderRepo *orderRepository) GetOrderNumber() (string, error) {

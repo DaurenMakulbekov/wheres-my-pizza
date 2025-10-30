@@ -9,7 +9,7 @@ type OrderService interface {
 }
 
 type OrderRepository interface {
-	CreateOrder(order domain.Order) error
+	CreateOrder(order domain.Order) (int64, error)
 	GetOrderNumber() (string, error)
 }
 

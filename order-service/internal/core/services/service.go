@@ -199,10 +199,11 @@ func (service *service) CreateOrder(order domain.Order) (domain.Result, error, e
 	order.UpdatedAt = time.Now().UTC()
 	SetOrderItemsCreatedAt(order.Items)
 
-	err = service.orderRepository.CreateOrder(order)
+	orderID, err := service.orderRepository.CreateOrder(order)
 	if err != nil {
 		return result, domain.InternalServerError, err
 	}
+	order.ID = orderID
 
 	err = service.publisher.Publish(order)
 	if err != nil {
