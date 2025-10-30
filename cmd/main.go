@@ -5,6 +5,7 @@ import (
 	"log"
 	"strconv"
 	"wheres-my-pizza/order-service/cmd/app"
+	Trackingapp "wheres-my-pizza/tracking-service/cmd/app"
 )
 
 func main() {
@@ -20,5 +21,11 @@ func main() {
 		}
 
 		app.Run(*port, *maxConcurrent)
+	} else if *mode == "tracking-service" {
+		number, err := strconv.Atoi(*port)
+		if err != nil || number < 1024 || number > 49151 {
+			log.Fatal("Error: incorrect port number")
+		}
+		Trackingapp.Run()
 	}
 }
