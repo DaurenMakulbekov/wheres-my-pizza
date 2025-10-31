@@ -29,8 +29,10 @@ func Run(workerName, orderTypes string, heartbeatInterval, prefetch int) {
 	var consumerService = services.NewConsumerService(database, consumer, ctx)
 	var handler = handlers.NewConsumerHandler(consumerService)
 
-	handler.RegisterHandler(workerName, orderTypes, heartbeatInterval, prefetch)
-	handler.ConsumerHandler()
+	go func() {
+		handler.RegisterHandler(workerName, orderTypes, heartbeatInterval, prefetch)
+		handler.ConsumerHandler()
+	}()
 
 	signalCtx, signalCtxStop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGTSTP)
 	defer signalCtxStop()

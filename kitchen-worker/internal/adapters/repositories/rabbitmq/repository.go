@@ -103,6 +103,8 @@ func (consumer *consumer) ReadMessages(orderType string, prefetch int, out chan 
 	}
 
 	go func() {
+		defer close(out)
+
 		for d := range messages {
 			out <- string(d.Body)
 
@@ -184,7 +186,6 @@ func (consumer *consumer) Reconnect() {
 			}
 		}
 	}()
-
 }
 
 func (consumer *consumer) IsClosed() (bool, bool) {

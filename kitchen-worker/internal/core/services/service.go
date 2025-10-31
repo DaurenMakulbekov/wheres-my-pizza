@@ -150,78 +150,110 @@ func (service *service) CreateMessage(order domain.Order, oldStatus, newStatus s
 	return message
 }
 
-func (service *service) Start() error {
+func (service *service) Read(out chan string, m map[string]chan bool) error {
 	var orderTypes = service.orderTypes
-	var out = make(chan string)
-	defer close(out)
-	var m = make(map[string]chan bool)
+	var reconnect bool
 
-	for i := range orderTypes {
-		var done = make(chan bool)
-		m[orderTypes[i]] = done
-		defer close(done)
+	for {
+		var connIsClosed, chanIsClosed = service.consumer.IsClosed()
 
-		var err = service.consumer.ReadMessages(orderTypes[i], service.prefetch, out, done)
-		if err != nil {
-			return err
+		if connIsClosed && chanIsClosed {
+			if reconnect == false {
+				service.consumer.Reconnect()
+				reconnect = true
+			}
+
+			select {
+			case <-service.ctx.Done():
+				return nil
+			case <-time.After(5 * time.Second):
+				continue
+			}
+		} else {
+			for i := range orderTypes {
+				var done = make(chan bool)
+				m[orderTypes[i]] = done
+
+				var err = service.consumer.ReadMessages(orderTypes[i], service.prefetch, out, done)
+				if err != nil {
+					return err
+				}
+			}
+			break
 		}
 	}
 
+	return nil
+}
+
+func (service *service) Start() error {
+	var orderTypes = service.orderTypes
+
 	for {
-		select {
-		case <-service.ctx.Done():
-			return nil
-		case message := <-out:
-			var order domain.Order
-			decoder := json.NewDecoder(strings.NewReader(message))
+		var out = make(chan string)
+		var m = make(map[string]chan bool)
 
-			err := decoder.Decode(&order)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, "Error decode:", err)
+		var err = service.Read(out, m)
+		if err != nil {
+			continue
+		}
+
+		for message := range out {
+			select {
+			case <-service.ctx.Done():
+				return nil
+			default:
+				var order domain.Order
+				decoder := json.NewDecoder(strings.NewReader(message))
+
+				err := decoder.Decode(&order)
+				if err != nil {
+					fmt.Fprintln(os.Stderr, "Error decode:", err)
+				}
+
+				if !slices.Contains(orderTypes, order.Type) {
+					m[order.Type] <- true
+					continue
+				}
+
+				err = service.database.UpdateOrder(service.worker, order)
+				if err != nil {
+					m[order.Type] <- true
+					continue
+				}
+
+				var msg = service.CreateMessage(order, "received", "cooking")
+
+				err = service.consumer.PublishStatusUpdate(msg)
+				if err != nil {
+					close(m[order.Type])
+					break
+				}
+
+				if order.Type == "dine_in" {
+					time.Sleep(8 * time.Second)
+				} else if order.Type == "takeout" {
+					time.Sleep(20 * time.Second)
+				} else if order.Type == "delivery" {
+					time.Sleep(12 * time.Second)
+				}
+
+				msg = service.CreateMessage(order, "cooking", "ready")
+
+				err = service.consumer.PublishStatusUpdate(msg)
+				if err != nil {
+					close(m[order.Type])
+					break
+				}
+
+				err = service.database.UpdateOrderReady(service.worker, order)
+				if err != nil {
+					m[order.Type] <- true
+					continue
+				}
+
+				m[order.Type] <- false
 			}
-
-			if !slices.Contains(orderTypes, order.Type) {
-				m[order.Type] <- true
-				continue
-			}
-
-			err = service.database.UpdateOrder(service.worker, order)
-			if err != nil {
-				m[order.Type] <- true
-				continue
-			}
-
-			var msg = service.CreateMessage(order, "received", "cooking")
-
-			err = service.consumer.PublishStatusUpdate(msg)
-			if err != nil {
-				m[order.Type] <- true
-				continue
-			}
-
-			if order.Type == "dine_in" {
-				time.Sleep(8 * time.Second)
-			} else if order.Type == "takeout" {
-				time.Sleep(10 * time.Second)
-			} else if order.Type == "delivery" {
-				time.Sleep(12 * time.Second)
-			}
-
-			msg = service.CreateMessage(order, "cooking", "ready")
-
-			err = service.consumer.PublishStatusUpdate(msg)
-			if err != nil {
-				m[order.Type] <- true
-				continue
-			}
-
-			err = service.database.UpdateOrderReady(service.worker, order)
-			if err != nil {
-				m[order.Type] <- true
-				continue
-			}
-
-			m[order.Type] <- false
 		}
 	}
 }
