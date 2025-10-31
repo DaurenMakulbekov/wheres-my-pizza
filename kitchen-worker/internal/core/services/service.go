@@ -150,110 +150,70 @@ func (service *service) CreateMessage(order domain.Order, oldStatus, newStatus s
 	return message
 }
 
-func (service *service) Read(out chan string, m map[string]chan bool) error {
+func (service *service) Start() {
 	var orderTypes = service.orderTypes
-	var reconnect bool
+	var out = make(chan string)
+	defer close(out)
+
+	var m = make(map[string]chan bool)
+
+	go service.consumer.ReadMessages(orderTypes, service.prefetch, out, m)
 
 	for {
-		var connIsClosed, chanIsClosed = service.consumer.IsClosed()
+		select {
+		case <-service.ctx.Done():
+			return
+		case message := <-out:
+			var order domain.Order
+			decoder := json.NewDecoder(strings.NewReader(message))
 
-		if connIsClosed && chanIsClosed {
-			if reconnect == false {
-				service.consumer.Reconnect()
-				reconnect = true
+			err := decoder.Decode(&order)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "Error decode:", err)
 			}
 
-			select {
-			case <-service.ctx.Done():
-				return nil
-			case <-time.After(5 * time.Second):
+			if !slices.Contains(orderTypes, order.Type) {
+				m[order.Type] <- true
 				continue
 			}
-		} else {
-			for i := range orderTypes {
-				var done = make(chan bool)
-				m[orderTypes[i]] = done
 
-				var err = service.consumer.ReadMessages(orderTypes[i], service.prefetch, out, done)
-				if err != nil {
-					return err
-				}
+			err = service.database.UpdateOrder(service.worker, order)
+			if err != nil {
+				m[order.Type] <- true
+				continue
 			}
-			break
-		}
-	}
 
-	return nil
-}
+			var msg = service.CreateMessage(order, "received", "cooking")
 
-func (service *service) Start() error {
-	var orderTypes = service.orderTypes
-
-	for {
-		var out = make(chan string)
-		var m = make(map[string]chan bool)
-
-		var err = service.Read(out, m)
-		if err != nil {
-			continue
-		}
-
-		for message := range out {
-			select {
-			case <-service.ctx.Done():
-				return nil
-			default:
-				var order domain.Order
-				decoder := json.NewDecoder(strings.NewReader(message))
-
-				err := decoder.Decode(&order)
-				if err != nil {
-					fmt.Fprintln(os.Stderr, "Error decode:", err)
-				}
-
-				if !slices.Contains(orderTypes, order.Type) {
-					m[order.Type] <- true
-					continue
-				}
-
-				err = service.database.UpdateOrder(service.worker, order)
-				if err != nil {
-					m[order.Type] <- true
-					continue
-				}
-
-				var msg = service.CreateMessage(order, "received", "cooking")
-
-				err = service.consumer.PublishStatusUpdate(msg)
-				if err != nil {
-					close(m[order.Type])
-					break
-				}
-
-				if order.Type == "dine_in" {
-					time.Sleep(8 * time.Second)
-				} else if order.Type == "takeout" {
-					time.Sleep(20 * time.Second)
-				} else if order.Type == "delivery" {
-					time.Sleep(12 * time.Second)
-				}
-
-				msg = service.CreateMessage(order, "cooking", "ready")
-
-				err = service.consumer.PublishStatusUpdate(msg)
-				if err != nil {
-					close(m[order.Type])
-					break
-				}
-
-				err = service.database.UpdateOrderReady(service.worker, order)
-				if err != nil {
-					m[order.Type] <- true
-					continue
-				}
-
-				m[order.Type] <- false
+			err = service.consumer.PublishStatusUpdate(msg)
+			if err != nil {
+				m[order.Type] <- true
+				break
 			}
+
+			if order.Type == "dine_in" {
+				time.Sleep(8 * time.Second)
+			} else if order.Type == "takeout" {
+				time.Sleep(20 * time.Second)
+			} else if order.Type == "delivery" {
+				time.Sleep(12 * time.Second)
+			}
+
+			msg = service.CreateMessage(order, "cooking", "ready")
+
+			err = service.consumer.PublishStatusUpdate(msg)
+			if err != nil {
+				m[order.Type] <- true
+				break
+			}
+
+			err = service.database.UpdateOrderReady(service.worker, order)
+			if err != nil {
+				m[order.Type] <- true
+				continue
+			}
+
+			m[order.Type] <- false
 		}
 	}
 }

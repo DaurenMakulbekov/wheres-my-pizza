@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"sync"
 	"time"
 	"wheres-my-pizza/kitchen-worker/internal/core/domain"
 	"wheres-my-pizza/kitchen-worker/internal/infrastructure/config"
@@ -43,85 +44,97 @@ func NewRabbitMQRepository(config *config.RabbitMQ, ctxMain context.Context) *co
 	}
 }
 
-func (consumer *consumer) ReadMessages(orderType string, prefetch int, out chan string, done chan bool) error {
-	var err = consumer.Channel.ExchangeDeclare(
-		"orders_topic", // name
-		"topic",        // type
-		true,           // durable
-		false,          // auto deleted
-		false,          // internal
-		false,          // no-wait
-		nil,            // arguments
-	)
-	if err != nil {
-		return fmt.Errorf("Failed to declare an exchange")
-	}
+func (consumer *consumer) ReadMessages(orderTypes []string, prefetch int, out chan string, m map[string]chan bool) {
+	for {
+		var wg sync.WaitGroup
 
-	q, err := consumer.Channel.QueueDeclare(
-		"kitchen_"+orderType+"_queue", // name
-		true,                          // durable
-		false,                         // delete when unused
-		false,                         // exclusive
-		false,                         // no-wait
-		nil,                           // arguments
-	)
-	if err != nil {
-		return fmt.Errorf("Failed to declare a queue")
-	}
+		for i := range orderTypes {
+			var done = make(chan bool)
+			m[orderTypes[i]] = done
 
-	err = consumer.Channel.QueueBind(
-		q.Name,                       // queue name
-		"kitchen."+orderType+"."+"*", // routing key
-		"orders_topic",               // exchange
-		false,
-		nil,
-	)
-	if err != nil {
-		return fmt.Errorf("Failed to bind a queue")
-	}
-
-	err = consumer.Channel.Qos(
-		prefetch, // prefetch count
-		0,        // prefetch size
-		false,    // global
-	)
-	if err != nil {
-		return fmt.Errorf("Failed to set QoS")
-	}
-
-	messages, err := consumer.Channel.Consume(
-		q.Name, // queue
-		"",     // consumer
-		false,  // auto-ack
-		false,  // exclusive
-		false,  // no-local
-		false,  // no-wait
-		nil,    // args
-	)
-	if err != nil {
-		return fmt.Errorf("Failed to register a consumer")
-	}
-
-	go func() {
-		defer close(out)
-
-		for d := range messages {
-			out <- string(d.Body)
-
-			select {
-			case requeue := <-done:
-				if requeue {
-					d.Nack(true, true)
-				} else {
-					d.Ack(false)
-				}
-			case <-consumer.ctx.Done():
-				return
+			var err = consumer.Channel.ExchangeDeclare(
+				"orders_topic", // name
+				"topic",        // type
+				true,           // durable
+				false,          // auto deleted
+				false,          // internal
+				false,          // no-wait
+				nil,            // arguments
+			)
+			if err != nil {
+				//return fmt.Errorf("Failed to declare an exchange")
 			}
-		}
-	}()
 
-	return nil
+			q, err := consumer.Channel.QueueDeclare(
+				"kitchen_"+orderTypes[i]+"_queue", // name
+				true,                              // durable
+				false,                             // delete when unused
+				false,                             // exclusive
+				false,                             // no-wait
+				nil,                               // arguments
+			)
+			if err != nil {
+				//return fmt.Errorf("Failed to declare a queue")
+			}
+
+			err = consumer.Channel.QueueBind(
+				q.Name,                           // queue name
+				"kitchen."+orderTypes[i]+"."+"*", // routing key
+				"orders_topic",                   // exchange
+				false,
+				nil,
+			)
+			if err != nil {
+				//return fmt.Errorf("Failed to bind a queue")
+			}
+
+			err = consumer.Channel.Qos(
+				prefetch, // prefetch count
+				0,        // prefetch size
+				false,    // global
+			)
+			if err != nil {
+				//return fmt.Errorf("Failed to set QoS")
+			}
+
+			messages, err := consumer.Channel.Consume(
+				q.Name, // queue
+				"",     // consumer
+				false,  // auto-ack
+				false,  // exclusive
+				false,  // no-local
+				false,  // no-wait
+				nil,    // args
+			)
+			if err != nil {
+				//return fmt.Errorf("Failed to register a consumer")
+			}
+
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				defer close(done)
+
+				for d := range messages {
+					out <- string(d.Body)
+
+					select {
+					case requeue := <-done:
+						if requeue {
+							d.Nack(true, true)
+						} else {
+							d.Ack(false)
+						}
+					case <-consumer.ctx.Done():
+						return
+					}
+				}
+			}()
+		}
+
+		wg.Wait()
+		consumer.Reconnect()
+	}
 }
 
 func (consumer *consumer) PublishStatusUpdate(message domain.Message) error {
@@ -165,27 +178,25 @@ func (consumer *consumer) PublishStatusUpdate(message domain.Message) error {
 }
 
 func (consumer *consumer) Reconnect() {
-	go func() {
-		for {
-			conn, err := amqp.Dial(consumer.url)
+	for {
+		conn, err := amqp.Dial(consumer.url)
+		if err == nil {
+			ch, err := conn.Channel()
 			if err == nil {
-				ch, err := conn.Channel()
-				if err == nil {
-					consumer.Conn = conn
-					consumer.Channel = ch
-					break
-				}
-			}
-
-			if err != nil {
-				select {
-				case <-time.After(5 * time.Second):
-				case <-consumer.ctx.Done():
-					return
-				}
+				consumer.Conn = conn
+				consumer.Channel = ch
+				break
 			}
 		}
-	}()
+
+		if err != nil {
+			select {
+			case <-time.After(5 * time.Second):
+			case <-consumer.ctx.Done():
+				return
+			}
+		}
+	}
 }
 
 func (consumer *consumer) IsClosed() (bool, bool) {

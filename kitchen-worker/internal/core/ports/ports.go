@@ -6,7 +6,7 @@ import (
 
 type ConsumerService interface {
 	Register(workerName, orderTypes string, heartbeatInterval, prefetch int) error
-	Start() error
+	Start()
 }
 
 type Database interface {
@@ -18,7 +18,7 @@ type Database interface {
 }
 
 type Consumer interface {
-	ReadMessages(orderType string, prefetch int, out chan string, done chan bool) error
+	ReadMessages(orderTypes []string, prefetch int, out chan string, m map[string]chan bool)
 	PublishStatusUpdate(message domain.Message) error
 	Reconnect()
 	IsClosed() (bool, bool)
