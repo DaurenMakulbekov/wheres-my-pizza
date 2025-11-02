@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"slices"
 	"strings"
@@ -191,34 +192,64 @@ func (service *service) Start() {
 				break
 			}
 
+			var pause time.Duration
+
 			if order.Type == "dine_in" {
-				time.Sleep(8 * time.Second)
+				pause = 8
 			} else if order.Type == "takeout" {
-				time.Sleep(20 * time.Second)
+				pause = 10
 			} else if order.Type == "delivery" {
-				time.Sleep(12 * time.Second)
+				pause = 12
 			}
 
-			msg = service.CreateMessage(order, "cooking", "ready")
+			select {
+			case <-service.ctx.Done():
+				msg = service.CreateMessage(order, "cooking", "ready")
 
-			err = service.consumer.PublishStatusUpdate(msg)
-			if err != nil {
-				m[order.Type] <- true
-				break
+				err = service.consumer.PublishStatusUpdate(msg)
+				if err != nil {
+					m[order.Type] <- true
+					return
+				}
+
+				err = service.database.UpdateOrderReady(service.worker, order)
+				if err != nil {
+					m[order.Type] <- true
+					return
+				}
+
+				m[order.Type] <- false
+
+				return
+			case <-time.After(pause * time.Second):
+				msg = service.CreateMessage(order, "cooking", "ready")
+
+				err = service.consumer.PublishStatusUpdate(msg)
+				if err != nil {
+					m[order.Type] <- true
+					break
+				}
+
+				err = service.database.UpdateOrderReady(service.worker, order)
+				if err != nil {
+					m[order.Type] <- true
+					continue
+				}
+
+				m[order.Type] <- false
 			}
-
-			err = service.database.UpdateOrderReady(service.worker, order)
-			if err != nil {
-				m[order.Type] <- true
-				continue
-			}
-
-			m[order.Type] <- false
 		}
 	}
 }
 
 func (service *service) Close() {
+	service.worker.Status = "offline"
+
+	var err = service.database.UpdateWorker(service.worker)
+	if err != nil {
+		log.Printf("Error: %v", err)
+	}
+
 	service.ctxCansel()
 	service.consumer.Close()
 }

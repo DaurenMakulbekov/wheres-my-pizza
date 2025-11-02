@@ -19,6 +19,7 @@ type consumer struct {
 	url       string
 	ctx       context.Context
 	ctxCansel context.CancelFunc
+	wg        sync.WaitGroup
 }
 
 func NewRabbitMQRepository(config *config.RabbitMQ, ctxMain context.Context) *consumer {
@@ -41,13 +42,12 @@ func NewRabbitMQRepository(config *config.RabbitMQ, ctxMain context.Context) *co
 		url:       url,
 		ctx:       ctx,
 		ctxCansel: ctxCansel,
+		wg:        sync.WaitGroup{},
 	}
 }
 
 func (consumer *consumer) ReadMessages(orderTypes []string, prefetch int, out chan string, m map[string]chan bool) {
 	for {
-		var wg sync.WaitGroup
-
 		for i := range orderTypes {
 			var done = make(chan bool)
 			m[orderTypes[i]] = done
@@ -110,29 +110,50 @@ func (consumer *consumer) ReadMessages(orderTypes []string, prefetch int, out ch
 				//return fmt.Errorf("Failed to register a consumer")
 			}
 
-			wg.Add(1)
+			consumer.wg.Add(1)
 			go func() {
-				defer wg.Done()
+				defer consumer.wg.Done()
 				defer close(done)
 
-				for d := range messages {
-					out <- string(d.Body)
-
+				for {
 					select {
-					case requeue := <-done:
-						if requeue {
-							d.Nack(true, true)
-						} else {
-							d.Ack(false)
-						}
 					case <-consumer.ctx.Done():
 						return
+					case d := <-messages:
+						if consumer.Channel.IsClosed() {
+							return
+						}
+						out <- string(d.Body)
+
+						select {
+						case requeue := <-done:
+							if requeue {
+								d.Nack(true, true)
+							} else {
+								d.Ack(false)
+							}
+						case <-consumer.ctx.Done():
+							var requeue = <-done
+
+							if requeue {
+								d.Nack(true, true)
+							} else {
+								d.Ack(false)
+							}
+
+							return
+						}
 					}
 				}
 			}()
 		}
 
-		wg.Wait()
+		consumer.wg.Wait()
+
+		if err := consumer.ctx.Err(); err != nil {
+			fmt.Printf("Error : %v\n\n", err)
+			return
+		}
 		consumer.Reconnect()
 	}
 }
@@ -185,6 +206,7 @@ func (consumer *consumer) Reconnect() {
 			if err == nil {
 				consumer.Conn = conn
 				consumer.Channel = ch
+
 				break
 			}
 		}
@@ -205,6 +227,8 @@ func (consumer *consumer) IsClosed() (bool, bool) {
 
 func (consumer *consumer) Close() {
 	consumer.ctxCansel()
+
+	consumer.wg.Wait()
 
 	consumer.Channel.Close()
 	consumer.Conn.Close()
