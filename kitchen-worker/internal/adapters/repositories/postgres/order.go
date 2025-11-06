@@ -62,9 +62,20 @@ func (database *database) GetWorker(name string) (domain.Worker, error) {
 }
 
 func (database *database) UpdateWorker(worker domain.Worker) error {
-	var query = `UPDATE workers SET status = $1, type = $2 WHERE name = $3`
+	var query = `UPDATE workers SET status = $1, type = $2, last_seen = $3 WHERE name = $4`
 
-	_, err := database.db.Exec(query, worker.Status, worker.Type, worker.Name)
+	_, err := database.db.Exec(query, worker.Status, worker.Type, time.Now(), worker.Name)
+	if err != nil {
+		return fmt.Errorf("Error: update worker status: %v", err)
+	}
+
+	return nil
+}
+
+func (database *database) UpdateWorkerStatus(worker domain.Worker) error {
+	var query = `UPDATE workers SET status = $1, last_seen = $2 WHERE name = $3`
+
+	_, err := database.db.Exec(query, worker.Status, time.Now(), worker.Name)
 	if err != nil {
 		return fmt.Errorf("Error: update worker status: %v", err)
 	}

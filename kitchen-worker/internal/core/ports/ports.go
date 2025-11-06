@@ -13,6 +13,7 @@ type Database interface {
 	Register(worker domain.Worker) error
 	GetWorker(name string) (domain.Worker, error)
 	UpdateWorker(worker domain.Worker) error
+	UpdateWorkerStatus(worker domain.Worker) error
 	UpdateOrder(worker domain.Worker, order domain.Order) error
 	UpdateOrderReady(worker domain.Worker, order domain.Order) error
 }

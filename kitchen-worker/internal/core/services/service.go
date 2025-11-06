@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"slices"
 	"strings"
@@ -151,12 +152,34 @@ func (service *service) CreateMessage(order domain.Order, oldStatus, newStatus s
 	return message
 }
 
+func (service *service) UpdateWorker(ticker *time.Ticker) {
+	go func() {
+		for {
+			select {
+			case <-service.ctx.Done():
+				return
+			case <-ticker.C:
+				var err = service.database.UpdateWorkerStatus(service.worker)
+				if err != nil {
+					slog.Error("Failed to update worker status", "service", "kitchen-worker", "hostname", "kitchen-worker", "request_id", "heartbeat_sending", "action", "heartbeat_sent_failed", slog.Any("error", err))
+				} else {
+					slog.Debug("A heartbeat is successfully sent", "service", "kitchen-worker", "hostname", "kitchen-worker", "request_id", "heartbeat_sending", "action", "heartbeat_sent")
+				}
+			}
+		}
+	}()
+}
+
 func (service *service) Start() {
 	var orderTypes = service.orderTypes
 	var out = make(chan string)
 	defer close(out)
 
 	var m = make(map[string]chan bool)
+
+	var ticker = time.NewTicker(time.Duration(service.heartbeatInterval) * time.Second)
+	defer ticker.Stop()
+	service.UpdateWorker(ticker)
 
 	go service.consumer.ReadMessages(orderTypes, service.prefetch, out, m)
 
