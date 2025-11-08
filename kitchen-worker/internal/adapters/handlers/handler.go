@@ -44,7 +44,4 @@ func (hd *handler) RegisterHandler(workerName, orderTypes string, heartbeatInter
 
 func (hd *handler) ConsumerHandler() {
 	hd.consumerService.Start()
-	//if err != nil {
-	//	slog.Error("Failed to get messages", "service", "kitchen-worker", "hostname", "kitchen-worker", "request_id", "message_processing", "action", "message_processing_failed", slog.Any("error", err))
-	//}
 }

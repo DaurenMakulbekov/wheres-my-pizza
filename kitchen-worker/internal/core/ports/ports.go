@@ -14,6 +14,7 @@ type Database interface {
 	GetWorker(name string) (domain.Worker, error)
 	UpdateWorker(worker domain.Worker) error
 	UpdateWorkerStatus(worker domain.Worker) error
+	GetOrderStatus(order domain.Order) (string, error)
 	UpdateOrder(worker domain.Worker, order domain.Order) error
 	UpdateOrderReady(worker domain.Worker, order domain.Order) error
 }

@@ -83,6 +83,20 @@ func (database *database) UpdateWorkerStatus(worker domain.Worker) error {
 	return nil
 }
 
+func (database *database) GetOrderStatus(order domain.Order) (string, error) {
+	var status string
+
+	row := database.db.QueryRow("SELECT status FROM orders WHERE number = $1", order.Number)
+	if err := row.Scan(&status); err != nil {
+		if err == sql.ErrNoRows {
+			return status, fmt.Errorf("Error: %v", err)
+		}
+		return status, fmt.Errorf("Error: %v", err)
+	}
+
+	return status, nil
+}
+
 func (database *database) UpdateOrder(worker domain.Worker, order domain.Order) error {
 	tx, err := database.db.Begin()
 	if err != nil {

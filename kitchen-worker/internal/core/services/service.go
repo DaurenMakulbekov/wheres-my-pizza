@@ -170,6 +170,52 @@ func (service *service) UpdateWorker(ticker *time.Ticker) {
 	}()
 }
 
+func (service *service) UpdateOrder(order domain.Order, m map[string]chan bool, status string) error {
+	var oldStatus = order.Status
+
+	if status == "cooking" {
+		orderStatus, err := service.database.GetOrderStatus(order)
+		if err != nil {
+			return err
+		}
+		if orderStatus == "cooking" {
+			return nil
+		}
+
+		err = service.database.UpdateOrder(service.worker, order)
+		if err != nil {
+			m[order.Type] <- true
+			slog.Error("Failed to update an order", "service", "kitchen-worker", "hostname", "kitchen-worker", "request_id", "order_processing", "action", "order_processing_failed", slog.Any("error", err))
+
+			return err
+		}
+
+		order.Status = "cooking"
+	} else if status == "ready" {
+		var err = service.database.UpdateOrderReady(service.worker, order)
+		if err != nil {
+			m[order.Type] <- true
+			slog.Error("Failed to update an order", "service", "kitchen-worker", "hostname", "kitchen-worker", "request_id", "order_processing", "action", "order_processing_failed", slog.Any("error", err))
+
+			return err
+		}
+
+		order.Status = "ready"
+	}
+
+	var message = service.CreateMessage(order, oldStatus, status)
+
+	var err = service.consumer.PublishStatusUpdate(message)
+	if err != nil {
+		m[order.Type] <- true
+		slog.Error("Failed to publish a message", "service", "kitchen-worker", "hostname", "kitchen-worker", "request_id", "message_processing", "action", "message_processing_failed", slog.Any("error", err))
+
+		return err
+	}
+
+	return nil
+}
+
 func (service *service) Start() {
 	var orderTypes = service.orderTypes
 	var out = make(chan string)
@@ -188,6 +234,8 @@ func (service *service) Start() {
 		case <-service.ctx.Done():
 			return
 		case message := <-out:
+			slog.Debug("Order picked from the queue", "service", "kitchen-worker", "hostname", "kitchen-worker", "request_id", "order_processing", "action", "order_processing_started")
+
 			var order domain.Order
 			decoder := json.NewDecoder(strings.NewReader(message))
 
@@ -201,18 +249,9 @@ func (service *service) Start() {
 				continue
 			}
 
-			err = service.database.UpdateOrder(service.worker, order)
+			err = service.UpdateOrder(order, m, "cooking")
 			if err != nil {
-				m[order.Type] <- true
 				continue
-			}
-
-			var msg = service.CreateMessage(order, "received", "cooking")
-
-			err = service.consumer.PublishStatusUpdate(msg)
-			if err != nil {
-				m[order.Type] <- true
-				break
 			}
 
 			var pause time.Duration
@@ -227,39 +266,23 @@ func (service *service) Start() {
 
 			select {
 			case <-service.ctx.Done():
-				msg = service.CreateMessage(order, "cooking", "ready")
-
-				err = service.consumer.PublishStatusUpdate(msg)
+				err = service.UpdateOrder(order, m, "ready")
 				if err != nil {
-					m[order.Type] <- true
-					return
-				}
-
-				err = service.database.UpdateOrderReady(service.worker, order)
-				if err != nil {
-					m[order.Type] <- true
 					return
 				}
 
 				m[order.Type] <- false
+				slog.Debug("Order successfully processed", "service", "kitchen-worker", "hostname", "kitchen-worker", "request_id", "order_processing", "action", "order_completed")
 
 				return
 			case <-time.After(pause * time.Second):
-				msg = service.CreateMessage(order, "cooking", "ready")
-
-				err = service.consumer.PublishStatusUpdate(msg)
+				err = service.UpdateOrder(order, m, "ready")
 				if err != nil {
-					m[order.Type] <- true
-					break
-				}
-
-				err = service.database.UpdateOrderReady(service.worker, order)
-				if err != nil {
-					m[order.Type] <- true
 					continue
 				}
 
 				m[order.Type] <- false
+				slog.Debug("Order successfully processed", "service", "kitchen-worker", "hostname", "kitchen-worker", "request_id", "order_processing", "action", "order_completed")
 			}
 		}
 	}

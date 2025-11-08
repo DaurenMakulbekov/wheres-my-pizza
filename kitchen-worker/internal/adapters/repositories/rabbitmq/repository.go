@@ -62,7 +62,8 @@ func (consumer *consumer) ReadMessages(orderTypes []string, prefetch int, out ch
 				nil,            // arguments
 			)
 			if err != nil {
-				//return fmt.Errorf("Failed to declare an exchange")
+				log.Println("Failed to declare an exchange")
+				break
 			}
 
 			q, err := consumer.Channel.QueueDeclare(
@@ -74,7 +75,8 @@ func (consumer *consumer) ReadMessages(orderTypes []string, prefetch int, out ch
 				nil,                               // arguments
 			)
 			if err != nil {
-				//return fmt.Errorf("Failed to declare a queue")
+				log.Println("Failed to declare a queue")
+				break
 			}
 
 			err = consumer.Channel.QueueBind(
@@ -85,7 +87,8 @@ func (consumer *consumer) ReadMessages(orderTypes []string, prefetch int, out ch
 				nil,
 			)
 			if err != nil {
-				//return fmt.Errorf("Failed to bind a queue")
+				log.Println("Failed to bind a queue")
+				break
 			}
 
 			err = consumer.Channel.Qos(
@@ -94,7 +97,8 @@ func (consumer *consumer) ReadMessages(orderTypes []string, prefetch int, out ch
 				false,    // global
 			)
 			if err != nil {
-				//return fmt.Errorf("Failed to set QoS")
+				log.Println("Failed to set QoS")
+				break
 			}
 
 			messages, err := consumer.Channel.Consume(
@@ -107,7 +111,8 @@ func (consumer *consumer) ReadMessages(orderTypes []string, prefetch int, out ch
 				nil,    // args
 			)
 			if err != nil {
-				//return fmt.Errorf("Failed to register a consumer")
+				log.Println("Failed to register a consumer")
+				break
 			}
 
 			consumer.wg.Add(1)
@@ -151,7 +156,6 @@ func (consumer *consumer) ReadMessages(orderTypes []string, prefetch int, out ch
 		consumer.wg.Wait()
 
 		if err := consumer.ctx.Err(); err != nil {
-			fmt.Printf("Error : %v\n\n", err)
 			return
 		}
 		consumer.Reconnect()
